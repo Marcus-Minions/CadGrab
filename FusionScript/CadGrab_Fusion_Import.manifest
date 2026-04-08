@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "author": "Marcus Minions",
+  "description": {
+    "": "Import CAD files from CadGrab output into Fusion."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

@@ -6,10 +6,11 @@ import zipfile
 import tempfile
 import time
 import sys
+import json
 import xml.etree.ElementTree as ET
 import concurrent.futures
 from urllib.parse import urljoin
-from typing import Set, List, Tuple, Optional
+from typing import Set, List, Tuple, Optional, Dict, Any
 
 # Fix Windows console encoding issues with special characters
 if sys.stdout.encoding.lower() != 'utf-8':
@@ -20,6 +21,11 @@ if sys.stdout.encoding.lower() != 'utf-8':
 
 DOWNLOAD_DIR = "CAD_Files"
 DRY_RUN = False
+LINK_ONLY_MODE = True
+LINK_MANIFEST_NAME = "cad_links_manifest.json"
+LINK_MANIFEST_PATH = os.path.join(DOWNLOAD_DIR, LINK_MANIFEST_NAME)
+REQUIRED_LINK_MANIFEST_FIELDS = ("url", "product_url", "vendor")
+_link_manifest: Dict[str, Dict[str, Any]] = {}
 
 STANDARD_CATEGORIES = {
     "electronics": "ELECTRONICS",
@@ -133,6 +139,72 @@ def download_cad_file(file_url: str, target_folder: str, clean_name: str) -> Non
         print(f"     Failed to download CAD {clean_name}: {e}")
 
 
+def load_link_manifest() -> None:
+    global _link_manifest
+    if os.path.exists(LINK_MANIFEST_PATH):
+        try:
+            with open(LINK_MANIFEST_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                validated_manifest: Dict[str, Dict[str, Any]] = {}
+                for k, v in data.items():
+                    if not isinstance(k, str) or not isinstance(v, dict):
+                        continue
+                    if not all(key in v for key in REQUIRED_LINK_MANIFEST_FIELDS):
+                        continue
+                    if not all(isinstance(v[key], str) and v[key] for key in REQUIRED_LINK_MANIFEST_FIELDS):
+                        continue
+                    validated_manifest[k] = v
+                _link_manifest = validated_manifest
+            else:
+                _link_manifest = {}
+                print(f"[WARN] Link manifest format invalid. Starting fresh: {LINK_MANIFEST_PATH}")
+        except (json.JSONDecodeError, OSError) as e:
+            _link_manifest = {}
+            print(f"[WARN] Could not load link manifest ({e}). Starting fresh: {LINK_MANIFEST_PATH}")
+    else:
+        _link_manifest = {}
+
+
+def save_link_manifest() -> None:
+    try:
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        with open(LINK_MANIFEST_PATH, "w", encoding="utf-8") as f:
+            json.dump(_link_manifest, f, indent=2, ensure_ascii=False, sort_keys=True)
+    except OSError as e:
+        print(f"[WARN] Could not save link manifest ({e}): {LINK_MANIFEST_PATH}")
+
+
+def store_cad_link(file_url: str, target_folder: str, clean_name: str, product_url: str, vendor: str) -> bool:
+    relative_dir = os.path.relpath(target_folder, DOWNLOAD_DIR)
+    if relative_dir in (".", ""):
+        relative_path = f"{clean_name}.step"
+    else:
+        relative_path = f"{relative_dir}/{clean_name}.step".replace("\\", "/")
+
+    if relative_path in _link_manifest:
+        return False
+
+    _link_manifest[relative_path] = {
+        "url": file_url,
+        "product_url": product_url,
+        "vendor": vendor
+    }
+    return True
+
+
+def get_run_action_label() -> str:
+    return 'DRY-RUN' if DRY_RUN else ('LINKING' if LINK_ONLY_MODE else 'DOWNLOADING')
+
+
+def handle_link_only_entry(step_link: Optional[str], folder_path: str, clean_name: str, product_url: str, vendor_name: str) -> None:
+    if step_link:
+        if not store_cad_link(step_link, folder_path, clean_name, product_url, vendor_name):
+            print(f"[SKIPPED] {clean_name} already exists in link manifest.")
+    else:
+        print(f"[SKIPPED] No STEP link found for {clean_name}.")
+
+
 class BaseScraper:
     name: str = "Base"
     base_url: str = ""
@@ -151,6 +223,9 @@ class BaseScraper:
             except Exception as e:
                 print(f"Error processing {prod_url}: {e}")
             time.sleep(0.5)
+
+        if not DRY_RUN and LINK_ONLY_MODE:
+            save_link_manifest()
 
     def get_all_product_urls(self) -> List[str]:
         return []
@@ -308,17 +383,21 @@ class GobildaScraper(BaseScraper):
         if not DRY_RUN:
             os.makedirs(folder_path, exist_ok=True)
         
-        print(f"[{'DRY-RUN' if DRY_RUN else 'DOWNLOADING'}] {clean_name}")
+        action = get_run_action_label()
+        print(f"[{action}] {clean_name}")
         print(f"  -> Path: {folder_path}")
         print(f"  -> Link: {step_link}")
 
         if not DRY_RUN:
-            expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
-            if os.path.exists(expected_dest_path):
-                print(f"[SKIPPED] {clean_name} already exists.")
-                return
-            if step_link:
-                download_cad_file(str(step_link), str(folder_path), clean_name)
+            if LINK_ONLY_MODE:
+                handle_link_only_entry(step_link, str(folder_path), clean_name, product_url, self.name)
+            else:
+                expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
+                if os.path.exists(expected_dest_path):
+                    print(f"[SKIPPED] {clean_name} already exists.")
+                    return
+                if step_link:
+                    download_cad_file(str(step_link), str(folder_path), clean_name)
 
 
 class RevScraper(BaseScraper):
@@ -404,17 +483,21 @@ class RevScraper(BaseScraper):
         if not DRY_RUN:
             os.makedirs(folder_path, exist_ok=True)
         
-        print(f"[{'DRY-RUN' if DRY_RUN else 'DOWNLOADING'}] {clean_name}")
+        action = get_run_action_label()
+        print(f"[{action}] {clean_name}")
         print(f"  -> Path: {folder_path}")
         print(f"  -> Link: {step_link}")
 
         if not DRY_RUN:
-            expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
-            if os.path.exists(expected_dest_path):
-                print(f"[SKIPPED] {clean_name} already exists.")
-                return
-            if step_link:
-                download_cad_file(str(step_link), str(folder_path), clean_name)
+            if LINK_ONLY_MODE:
+                handle_link_only_entry(step_link, str(folder_path), clean_name, product_url, self.name)
+            else:
+                expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
+                if os.path.exists(expected_dest_path):
+                    print(f"[SKIPPED] {clean_name} already exists.")
+                    return
+                if step_link:
+                    download_cad_file(str(step_link), str(folder_path), clean_name)
 
 
 class AndyMarkScraper(BaseScraper):
@@ -503,16 +586,20 @@ class AndyMarkScraper(BaseScraper):
         if not DRY_RUN:
             os.makedirs(folder_path, exist_ok=True)
         
-        print(f"[{'DRY-RUN' if DRY_RUN else 'DOWNLOADING'}] {clean_name}")
+        action = get_run_action_label()
+        print(f"[{action}] {clean_name}")
         print(f"  -> Path: {folder_path}")
         print(f"  -> Link: {step_link}")
 
         if not DRY_RUN:
-            expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
-            if os.path.exists(expected_dest_path):
-                print(f"[SKIPPED] {clean_name} already exists.")
-                return
-            download_cad_file(step_link, folder_path, clean_name)
+            if LINK_ONLY_MODE:
+                handle_link_only_entry(step_link, str(folder_path), clean_name, product_url, self.name)
+            else:
+                expected_dest_path = os.path.join(folder_path, f"{clean_name}.step")
+                if os.path.exists(expected_dest_path):
+                    print(f"[SKIPPED] {clean_name} already exists.")
+                    return
+                download_cad_file(step_link, folder_path, clean_name)
 
 def main():
     print("====================================")
@@ -520,6 +607,10 @@ def main():
     print("====================================")
     if DRY_RUN:
         print("!!! RUNNING IN DRY_RUN MODE. Files will NOT be downloaded. !!!")
+    elif LINK_ONLY_MODE:
+        print(f"!!! RUNNING IN LINK_ONLY_MODE. STEP files will not be downloaded locally.")
+        print(f"!!! Link manifest will be written to: {LINK_MANIFEST_PATH}")
+        load_link_manifest()
     
     print("\nSelect websites to scrape CAD parts from:")
     print("[1] goBILDA")

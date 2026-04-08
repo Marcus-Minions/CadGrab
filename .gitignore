@@ -5,6 +5,7 @@ __pycache__/
 
 # PyInstaller
 *.manifest
+!/FusionScript/CadGrab_Fusion_Import.manifest
 *.spec
 
 # Distribution / packaging

@@ -22,7 +22,7 @@
 
 ## 📖 Overview
 
-**CadGrab** is a powerful, automated Python scraper and download manager designed to extract, organize, and rename 3D CAD (`.step`) files from the most popular FIRST Tech Challenge (FTC) robotics vendors.
+**CadGrab** is a powerful, automated Python scraper designed to extract, organize, and map 3D CAD (`.step`) files from the most popular FIRST Tech Challenge (FTC) robotics vendors.
 
 ### Supported Vendors:
 1. 🟠 **goBILDA**
@@ -78,9 +78,9 @@ Ensure you have **Python 3.8+** installed on your machine.
    
    Enter choice (1-4):
    ```
-4. **Sit back and relax.** The script will create a root `CAD_Files` directory and begin placing thousands of `.step` files perfectly into categorized sub-folders!
+4. **Sit back and relax.** The script will create a root `CAD_Files` directory and generate a `cad_links_manifest.json` file with categorized vendor STEP links that can be used for Fusion import workflows without pre-downloading everything locally.
 
-> **💡 Pro Tip:** Change `DRY_RUN = True` inside `cad_grab.py` if you simply want to scan the sites and preview the file output paths without utilizing network data.
+> **💡 Pro Tip:** Change `DRY_RUN = True` inside `cad_grab.py` if you simply want to scan the sites and preview the output paths without writing a link manifest.
 
 ---
 
