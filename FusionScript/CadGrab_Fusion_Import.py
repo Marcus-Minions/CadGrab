@@ -219,12 +219,136 @@ def do_import(target_project, root_local_folder, selected_subdirs, import_root_f
     else:
          _ui.messageBox(f'Import Complete!\nUploaded: {files_imported}\nSkipped (Duplicates): {files_skipped}')
 
+class CadGrabFetchPartHandler(adsk.core.CustomEventHandler):
+    def __init__(self):
+        super().__init__()
+    def notify(self, args):
+        try:
+            import json, ssl, urllib.request, re, tempfile, zipfile
+            from urllib.parse import urljoin
+            
+            payload = json.loads(args.additionalInfo)
+            supplier = payload.get("supplier", "").lower()
+            part_number = payload.get("part_number", "")
+            
+            if not supplier or not part_number: return
+
+            cache_dir = os.path.join(tempfile.gettempdir(), 'CadGrab_Cache')
+            os.makedirs(cache_dir, exist_ok=True)
+            final_step_path = os.path.join(cache_dir, f"{supplier}_{part_number}.step".replace('/', '_').replace('\\', '_'))
+            
+            if not os.path.exists(final_step_path):
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                
+                domain, search_url = "", ""
+                if "gobilda" in supplier:
+                    domain = "https://www.gobilda.com"
+                    search_url = f"{domain}/search.php?search_query={part_number}"
+                elif "rev" in supplier:
+                    domain = "https://www.revrobotics.com"
+                    search_url = f"{domain}/search.php?search_query={part_number}"
+                elif "andy" in supplier:
+                    domain = "https://www.andymark.com"
+                    search_url = f"{domain}/search?q={part_number}"
+                else:
+                    return
+                    
+                req = urllib.request.Request(search_url, headers=headers)
+                resp = urllib.request.urlopen(req, context=ctx)
+                html = resp.read().decode('utf-8')
+                
+                file_link = None
+                
+                # Check for direct STEP text matches first:
+                matches = re.finditer(r'<a[^>]+href=[\'\"]([^\'\"]+)[\'\"][^>]*>(.*?)</a>', html, re.IGNORECASE | re.DOTALL)
+                for m in matches:
+                    if 'STEP' in m.group(2).upper():
+                        file_link = m.group(1)
+                        break
+                        
+                if not file_link:
+                    links = re.findall(r'href=[\'\"]([^\'\"]+\.(?:step|stp|zip))[\'\"]', html, re.IGNORECASE)
+                    if links: file_link = links[0]
+                    
+                if not file_link:
+                     prod_links = []
+                     if "gobilda" in supplier:
+                         prod_links = re.findall(r'href=[\'\"](https://www\.gobilda\.com/[^\'\"]+)[\'\"]', html)
+                     elif "rev" in supplier:
+                         prod_links = re.findall(r'href=[\'\"](https://www\.revrobotics\.com/[^\'\"]+)[\'\"]', html)
+                     elif "andy" in supplier:
+                         prod_links = re.findall(r'href=[\'\"](/products/[^\'\"]+)[\'\"]', html)
+                         
+                     for pl in prod_links:
+                         if part_number.lower() in pl.lower() and "search" not in pl.lower():
+                             if pl.startswith('/'): pl = domain + pl
+                             req2 = urllib.request.Request(pl, headers=headers)
+                             resp2 = urllib.request.urlopen(req2, context=ctx)
+                             html2 = resp2.read().decode('utf-8')
+                             matches2 = re.finditer(r'<a[^>]+href=[\'\"]([^\'\"]+)[\'\"][^>]*>(.*?)</a>', html2, re.IGNORECASE | re.DOTALL)
+                             for m2 in matches2:
+                                 if 'STEP' in m2.group(2).upper():
+                                     file_link = m2.group(1)
+                                     break
+                             if not file_link:
+                                 links2 = re.findall(r'href=[\'\"]([^\'\"]+\.(?:step|stp|zip))[\'\"]', html2, re.IGNORECASE)
+                                 if links2: file_link = links2[0]
+                             if file_link: break
+                             
+                if file_link:
+                     if not file_link.startswith('http'):
+                         file_link = urljoin(domain, file_link)
+                     req3 = urllib.request.Request(file_link, headers=headers)
+                     resp3 = urllib.request.urlopen(req3, context=ctx)
+                     is_zip = file_link.lower().endswith('.zip') or 'zip' in resp3.headers.get('Content-Type', '').lower()
+                     if is_zip:
+                         tmp_zip = os.path.join(cache_dir, f"{part_number}_temp.zip")
+                         with open(tmp_zip, 'wb') as f: f.write(resp3.read())
+                         with zipfile.ZipFile(tmp_zip, 'r') as zf:
+                             step_files = [n for n in zf.namelist() if n.lower().endswith(('.step', '.stp'))]
+                             if step_files:
+                                 with zf.open(step_files[0]) as source, open(final_step_path, 'wb') as target:
+                                     target.write(source.read())
+                         os.remove(tmp_zip)
+                     else:
+                         with open(final_step_path, 'wb') as f:
+                             f.write(resp3.read())
+                             
+            if os.path.exists(final_step_path):
+                 app = adsk.core.Application.get()
+                 des = adsk.fusion.Design.cast(app.activeProduct)
+                 if des:
+                     importManager = app.importManager
+                     rootComp = des.rootComponent
+                     options = importManager.createSTEPImportOptions(final_step_path)
+                     importManager.importToTarget(options, rootComp)
+                     success_event = app.customEvents.itemById('CadGrab_FetchPart_Success_Event')
+                     if success_event:
+                         success_event.fire(json.dumps({"part_number": part_number, "status": "success"}))
+        except Exception:
+             pass # Headless fail silently
 
 def run(context):
     global _app, _ui, _selected_folder, _subdirs
     try:
         _app = adsk.core.Application.get()
         _ui  = _app.userInterface
+        
+        # Register CadGrab fetch event listeners for headless API
+        try:
+            fetchEvent = _app.registerCustomEvent('CadGrab_FetchPart_Event')
+            if fetchEvent:
+                onFetch = CadGrabFetchPartHandler()
+                fetchEvent.add(onFetch)
+                _handlers.append(onFetch)
+            _app.registerCustomEvent('CadGrab_FetchPart_Success_Event')
+            
+            # Allow the background headless API to stay alive even if UI config is cancelled
+            adsk.autoTerminate(False)
+        except: pass
         
         # 1. Ask user for the generic directory 
         folderDialog = _ui.createFolderDialog()
@@ -257,7 +381,7 @@ def run(context):
         
         cmdDef.execute()
         
-        # Tell Fusion to keep the script running while the dialog is active
+        # Tell Fusion to keep the script running while the dialog/listeners are active
         adsk.autoTerminate(False)
 
     except:
@@ -269,5 +393,8 @@ def stop(context):
         cmdDef = _ui.commandDefinitions.itemById('genericBulkImportCmd')
         if cmdDef:
             cmdDef.deleteMe()
+        _app = adsk.core.Application.get()
+        _app.unregisterCustomEvent('CadGrab_FetchPart_Event')
+        _app.unregisterCustomEvent('CadGrab_FetchPart_Success_Event')
     except:
         pass

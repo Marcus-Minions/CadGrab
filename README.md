@@ -101,6 +101,29 @@ If you want to quickly bulk import all of these downloaded `.step` files while c
 
 ---
 
+## 🔌 Headless API (For Developers)
+
+CadGrab-FTC includes a fully headless background scraper built directly into the Fusion 360 Add-In that operates without triggering any UI. This allows other Fusion 360 Add-Ins (like drive-base generators) to dynamically request components on the fly without breaking the user experience.
+
+If your Add-In needs a part, you can simply fire CadGrab's custom listener from anywhere in Fusion Python:
+
+```python
+import json
+
+# Request a specific item to be seamlessly dropped into the active viewport
+payload = {
+    "supplier": "goBILDA", 
+    "part_number": "3110-0016-0001"
+}
+app.fireCustomEvent('CadGrab_FetchPart_Event', json.dumps(payload))
+```
+
+This invokes the hyper-fast internal spider that bypasses the need for the `requests` library. It locates the `.step` file on the remote server, unpacks the zip internally, automatically caches it locally inside your Temp directory for instant repeat usage, and drops it into the active root component as an occurrence!
+
+*If you need to stall your script until the part arrives, CadGrab responds with `CadGrab_FetchPart_Success_Event` when finished.*
+
+---
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
