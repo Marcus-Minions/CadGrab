@@ -90,10 +90,11 @@ If you want to quickly bulk import all of these downloaded `.step` files while c
 
 1. Open Fusion 360 and navigate to the **Design** workspace.
 2. Select **Utilities** > **Scripts and Add-Ins** (or press `Shift + S`).
-3. Under the **Scripts** tab, click the green `+` icon next to **My Scripts**.
+3. Under the **Add-Ins** tab, click the green `+` icon next to **My Add-Ins**.
 4. Select the `FusionScript` folder located inside your cloned `CadGrab-FTC` directory.
-5. Click **Run** on the `CadGrab_Fusion_Import` script!
-6. A dialog will prompt you to select the exact `CAD_Files` folder that the scraper built.
+5. Click **Run** on the `CadGrab_Fusion_Import` add-in (and check "Run on Startup" so the API is always active)!
+6. A new **"CadGrab Bulk Import"** button will appear in your `ADD-INS` toolbar. Click it!
+7. A dialog will prompt you to select the exact `CAD_Files` folder that the scraper built.
 7. Select exactly which categories to upload (e.g., "Check *Motion*", "Uncheck *Hardware*").
 8. Fusion will now replicate the folders perfectly into your cloud Project!
 
