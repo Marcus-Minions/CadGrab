@@ -50,8 +50,7 @@ class ImportDestroyHandler(adsk.core.CommandEventHandler):
     def __init__(self):
         super().__init__()
     def notify(self, args):
-        # When UI dialog is closed, terminate the script
-        adsk.terminate()
+        pass # App stays alive for the background API!
 
 class ImportCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
     def __init__(self):
@@ -60,6 +59,18 @@ class ImportCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
         try:
             cmd = args.command
             cmd.isReturnComplete = False
+            
+            # Prompt folder before drawing inputs
+            global _selected_folder, _subdirs
+            folderDialog = _ui.createFolderDialog()
+            folderDialog.title = 'Select ANY local folder containing 3D models'
+            if folderDialog.showDialog() == adsk.core.DialogResults.DialogOK:
+                _selected_folder = folderDialog.folder
+                _subdirs = []
+                for item in os.listdir(_selected_folder):
+                     if os.path.isdir(os.path.join(_selected_folder, item)):
+                          _subdirs.append(item)
+                _subdirs.sort()
             
             # Hook up events
             onExecute = ImportExecuteHandler()
@@ -337,7 +348,6 @@ def run(context):
         _app = adsk.core.Application.get()
         _ui  = _app.userInterface
         
-        # Register CadGrab fetch event listeners for headless API
         try:
             fetchEvent = _app.registerCustomEvent('CadGrab_FetchPart_Event')
             if fetchEvent:
@@ -345,44 +355,22 @@ def run(context):
                 fetchEvent.add(onFetch)
                 _handlers.append(onFetch)
             _app.registerCustomEvent('CadGrab_FetchPart_Success_Event')
-            
-            # Allow the background headless API to stay alive even if UI config is cancelled
-            adsk.autoTerminate(False)
         except: pass
         
-        # 1. Ask user for the generic directory 
-        folderDialog = _ui.createFolderDialog()
-        folderDialog.title = 'Select ANY local folder containing 3D models'
-        dialogResult = folderDialog.showDialog()
-        
-        if dialogResult == adsk.core.DialogResults.DialogOK:
-            _selected_folder = folderDialog.folder
-        else:
-             return # User cancelled right away
+        cmdDef = _ui.commandDefinitions.itemById('cadGrabBulkImportCmd')
+        if cmdDef: cmdDef.deleteMe()
              
-        # 2. Extract first-level subdirectories for the UI checkboxes
-        _subdirs = []
-        for item in os.listdir(_selected_folder):
-             if os.path.isdir(os.path.join(_selected_folder, item)):
-                  _subdirs.append(item)
-                  
-        _subdirs.sort()
-
-        # 3. Create the Custom Command Dialog GUI
-        cmdDef = _ui.commandDefinitions.itemById('genericBulkImportCmd')
-        if cmdDef:
-             cmdDef.deleteMe()
-             
-        cmdDef = _ui.commandDefinitions.addButtonDefinition('genericBulkImportCmd', 'Bulk Import 3D Models', 'Imports a generic folder structure of CAD models to the cloud.')
+        cmdDef = _ui.commandDefinitions.addButtonDefinition('cadGrabBulkImportCmd', 'CadGrab Bulk Import', 'Imports a generic folder structure of CAD models to the cloud.')
         
         onCommandCreated = ImportCommandCreatedHandler()
         cmdDef.commandCreated.add(onCommandCreated)
         _handlers.append(onCommandCreated)
         
-        cmdDef.execute()
-        
-        # Tell Fusion to keep the script running while the dialog/listeners are active
-        adsk.autoTerminate(False)
+        panel = _ui.allToolbarPanels.itemById('SolidScriptsAddinsPanel')
+        if panel:
+            control = panel.controls.itemById('cadGrabBulkImportCmd')
+            if control: control.deleteMe()
+            panel.controls.addCommand(cmdDef)
 
     except:
         if _ui:
@@ -390,9 +378,13 @@ def run(context):
 
 def stop(context):
     try:
-        cmdDef = _ui.commandDefinitions.itemById('genericBulkImportCmd')
-        if cmdDef:
-            cmdDef.deleteMe()
+        cmdDef = _ui.commandDefinitions.itemById('cadGrabBulkImportCmd')
+        if cmdDef: cmdDef.deleteMe()
+        panel = _ui.allToolbarPanels.itemById('SolidScriptsAddinsPanel')
+        if panel:
+            control = panel.controls.itemById('cadGrabBulkImportCmd')
+            if control: control.deleteMe()
+            
         _app = adsk.core.Application.get()
         _app.unregisterCustomEvent('CadGrab_FetchPart_Event')
         _app.unregisterCustomEvent('CadGrab_FetchPart_Success_Event')

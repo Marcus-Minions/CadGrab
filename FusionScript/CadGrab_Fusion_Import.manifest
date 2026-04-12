@@ -1,0 +1,10 @@
+{
+	"autodeskProduct":	"Fusion360",
+	"type":	"addin",
+	"author":	"Marcus Minions",
+	"description":	{
+		"":	"Bulk imports local folder structure (like from CadGrab) into Fusion 360 Data Panel, recreating the folder structure."
+	},
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true
+}
